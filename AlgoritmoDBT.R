@@ -3,6 +3,7 @@ library(caret)
 library(tidyr)
 library(readxl)
 library(gbm)
+library(doSNOW)
 
 #Read in data
 DBT <- read_excel('PMA0719336_ScoreRiesgoCV_Corr_20150715 - FINAL CON OUTCOMES -Missing 2.xlsx')
@@ -34,19 +35,21 @@ hc.DBT <- hclust(dist(DBT.scaled), method ="complete")
 plot(hc.DBT,main='Hierarchical Clustering - Average Method', xlab='', sub='', cex=.1)
 heatmap(as.matrix(DBT.scaled), Rowv=NA)
 
-library(plot3D)
-fit <- cmdscale(dist(DBT),eig=TRUE, k=3) # k is the number of dim
+library(rgl)
+#3d MDS plot
+DBT$pcolor[DBT$DBT_Manual==0] <- "red"
+DBT$pcolor[DBT$DBT_Manual==1] <- "blue"
+DBT$pcolor[DBT$DBT_Manual==9] <- "darkgreen"
+fit <- cmdscale(dist(select(DBT, -ID_PACIENTE)),eig=TRUE, k=3) # k is the number of dim
 # plot solution 
 x1 <- fit$points[,1]
 y1 <- fit$points[,2]
 z1 <- fit$points[,3]
-plot3d(x1, y1, z1, xlab="Coordinate 1", ylab="Coordinate 2", zlab='Coordinate 3', 
-       main="MDS Toy Training Set - 3 dimensions", type="p", col=as.integer(DBT$DBT_Manual))
-
+plot3d(x1, y1, z1, col=DBT$pcolor, type="p", box=F)
 
 
 #Split dataset
-traintestpartition <- createDataPartition(DBT$DBT_Alg_Missing,
+traintestpartition <- createDataPartition(DBT$DBT_Manual,
                                  p=.7,
                                  list=F,
                                  times=1)
@@ -57,41 +60,38 @@ DBT_test <- DBT[-traintestpartition,]
 cl<-makeCluster(2) #change the 4 to your number of CPU cores
 registerDoSNOW(cl)
 
-ctrl <- trainControl(method='repeatedCV', 
+ctrl <- trainControl(method='cv', 
                      number=10,
-                     repeats=5, 
+                     repeats=3, 
                      verboseIter = T, 
                      classProbs = T, 
                      allowParallel = F,
                      summaryFunction = multiClassSummary)
 
-grid <- expand.grid(n.trees=c(100,500,1000),
-                    interaction.depth=c(1:8),
-                    shrinkage=c(0.01),
-                    n.minobsinnode=c(10,50))
+grid <- expand.grid(n.trees=c(50, 100,500),
+                    interaction.depth=c(4:8),
+                    shrinkage=c(0.01, 0.001, 0.1),
+                    n.minobsinnode=c(10))
 
 system.time(
-gbm.DBT <- train(DBT_Alg_Missing~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R +
-                     CANT_HGLI_FR + CANT_HGLI_R + CANT_GLU_120M_FR + CANT_GLU_120M_R + EDAD20050101,
-                 data=DBT_train,
+gbm.DBT <- train(make.names(DBT_Manual)~.,
+                 data=select(DBT_train, -ID_PACIENTE, -color, -pcolor),
                  tuneGrid=grid,
                  verbose=T,
                  metric='Accuracy',
                  distribution='multinomial',
                  trControl=ctrl,
+                 #tuneLength=9,
                  method='gbm')
 )
-                 
-grid2 <- expand.grid(n.trees=c(500),
-                    interaction.depth=c(1:5),
-                    shrinkage=c(0.001, 0.01, 0.1),
-                    n.minobsinnode=10)
+
+plot(gbm.DBT)                
+plot(varImp(gbm.DBT, scale=T))
 
 system.time(
-    gbm.DBT2 <- train(DBT_Alg_Missing~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R +
-                         CANT_HGLI_FR + CANT_HGLI_R + CANT_GLU_120M_FR + CANT_GLU_120M_R + EDAD20050101,
-                     data=DBT_train,
-                     tuneGrid=grid2,
+    gbm.DBT2 <- train(make.names(DBT_Manual)~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R + CANT_HGLI_R + EDAD20050101,
+                     data=select(DBT_train, -ID_PACIENTE, -color, -pcolor),
+                     tuneGrid=grid,
                      verbose=T,
                      metric='Accuracy',
                      distribution='multinomial',
@@ -99,41 +99,21 @@ system.time(
                      method='gbm')
 )
 
+varImp(gbm.DBT2)
 grid3 <- expand.grid(n.trees=c(500),
                      interaction.depth=4,
                      shrinkage=0.01,
                      n.minobsinnode=10)
 
-system.time(
-    gbm.DBT3 <- train(DBT_Alg_Missing~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R +
-                          CANT_HGLI_FR + CANT_HGLI_R + CANT_GLU_120M_FR + CANT_GLU_120M_R + EDAD20050101,
-                      data=DBT_train,
-                      tuneGrid=grid3,
-                      verbose=T,
-                      metric='Accuracy',
-                      distribution='multinomial',
-                      trControl=ctrl,
-                      method='gbm')
-)
+test_results <- predict(gbm.DBT2, DBT_test)
+confusionMatrix(test_results, make.names(DBT_test$DBT_Manual))
 
-varImp(gbm.DBT3)
-plot(varImp(gbm.DBT3))
-plot(gbm.DBT3, i.var=1)
-plot.gbm(gbm.DBT3, i="CANT_GLU_AMB_R")
+#AUC CI
+0.9883011+c(-1,1)*qnorm(.975)*0.004514493
 
-gbm.DBT4 <- gbm(DBT_Alg_Missing~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R +
-                    CANT_HGLI_FR + CANT_HGLI_R + CANT_GLU_120M_FR + CANT_GLU_120M_R + EDAD20050101,
-                data=DBT_train,
-                n.trees=500,
-                interaction.depth=4,
-                shrinkage=0.01,
-                cv.folds=10,
-                distribution='multinomial',
-                verbose="CV",
-                n.cores = 2)
+0.9579703+c(-1,1)*qnorm(.975)*0.01681903
 
 
-test_results <- predict(gbm.DBT3, DBT_test, type = "prob")
 test_results$obs <- DBT_test$DBT_Alg_Missing
 test_results$pred <- predict(gbm.DBT3, DBT_test)
 mnLogLoss(test_results, lev = levels(test_results$obs))
@@ -141,10 +121,43 @@ multiClassSummary(test_results, lev = levels(test_results$obs))
 multiclass.roc(test_results$obs, test_results$pred)
 
 
+gbm.DBT_full <- train(make.names(DBT_Manual)~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R + CANT_HGLI_R + EDAD20050101,
+                 data=DBT,
+                 #tuneGrid=grid,
+                 verbose=T,
+                 metric='Accuracy',
+                 distribution='multinomial',
+                 trControl=ctrl,
+                 tuneLength=3,
+                 method='gbm')
 
-test_results <- predict(gbm.DBT3, DBT_test)
-test_results$obs <- DBT_test$DBT_Alg_Missing
-test_results$pred <- predict(gbm.DBT3, DBT_test)
+
+
+0.9609+c(-1,1)*qnorm(.975)*0.01656741
+0.952+c(-1,1)*qnorm(.975)*0.004514493
+
+
+library(pROC)
+predictions <- as.numeric(predict(gbm.DBT2, DBT_test, type = 'raw'))
+ROC <-multiclass.roc(DBT_test$DBT_Manual, predictions)
+ci(ROC)
+
+library(ROCR)
+prediction(predictions, DBT_test$DBT_Manual)
+
+
+plot(1-ROC$rocs[[1]]$specificities)
+
+
+
+DBT_test_roc <- DBT_test
+DBT_test_roc$
+
+
+test_results <- predict(gbm.DBT2, DBT_test)
+test_results2 <- NULL
+test_results2$obs <- make.names(DBT_test$DBT_Manual)
+test_results2$pred <- predict(gbm.DBT2, DBT_test)
 confusionMatrix(test_results, test_results$obs)
 multiClassSummary(test_results, lev = test_results$obs)
 
