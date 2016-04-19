@@ -30,10 +30,18 @@ findCorrelation(DBT_cor, cutoff = .75)
 DBT <- select(DBT, -CANT_FECHAS_EVOL)
 
 library(NMF)
-DBT.scaled <- scale(select(DBT, -ID_PACIENTE, -DBT_Manual, -EDAD20050101))
+DBT.scaled <- t(select(DBT, -ID_PACIENTE, -DBT_Manual, -pcolor, -color, -EDAD20050101))
 hc.DBT <- hclust(dist(DBT.scaled), method ="complete")
-plot(hc.DBT,main='Hierarchical Clustering - Average Method', xlab='', sub='', cex=.1)
-heatmap(as.matrix(DBT.scaled), Rowv=NA)
+plot(hc.DBT,main='Hierarchical Clustering', xlab='', sub='', cex=1)
+heatmap(as.matrix(dist(DBT.scaled)))
+
+PCA2 <- preProcess(select(DBT, -ID_PACIENTE, -pcolor, -color), method = c("pca"))
+DBT.pca <- predict(PCA2, DBT)
+DBT.pca <- cbind(DBT.pca, DBT$DBT_Manual)
+
+DBT.pca %>%  ggplot(aes(PC1, PC2, color=as.factor(`DBT$DBT_Manual`))) + geom_point() +
+    scale_color_discrete(name='Status', labels=c('No-DBT', 'DBT', 'Indeterm'))
+
 
 library(rgl)
 #3d MDS plot
