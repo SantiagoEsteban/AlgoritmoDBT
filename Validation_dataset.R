@@ -2,6 +2,7 @@ library(dplyr)
 library(tidyr)
 library(readr)
 library(xlsx)
+library(stringr)
 
 #Evoluciones
 ############
@@ -11,8 +12,8 @@ evol$TEXTO <- paste(evol$FECHA, evol$TEXTO, sep=' - ')
 evol <- group_by(evol, ID_PACIENTE) %>% mutate(evol=rank(FECHA, ties.method='random')) %>% arrange(evol)
 evol <- evol[!duplicated(select(evol, -FECHA)),] %>% select(-FECHA) 
 evol <- evol[!duplicated(evol),] %>% spread(evol, TEXTO)
-evol_short <- evol[is.na(evol$`10`),]
-evol_long <- evol[!is.na(evol$`10`),]
+evol_short <- evol[is.na(evol$`10`),] %>% select(-EDAD20150101, -(12:101))
+evol_long <- evol[!is.na(evol$`10`),] %>% select(-EDAD20150101)
 
 #Problemas
 ##########
@@ -60,3 +61,48 @@ hb1ac <- hb1ac %>% group_by(ID_PACIENTE) %>% summarise(count_HB_GLI_FR=sum(HB_GL
 #Putting it all together
 ########################
 
+Valid_DBT_2015_short <- Valid_DBT_2015 %>% arrange(ID_PACIENTE)
+Valid_DBT_2015_short <- left_join(Valid_DBT_2015_short, evol_short, by='ID_PACIENTE') %>% left_join(prob_count, by='ID_PACIENTE') %>%
+                  left_join(meds, by='ID_PACIENTE') %>% left_join(glu_120, by='ID_PACIENTE') %>% left_join(glu_ayunas, by="ID_PACIENTE") %>%
+                  left_join(hb1ac, by='ID_PACIENTE')
+Valid_DBT_2015_short <- replace_na(Valid_DBT_2015_short, list(PROBLEMAS=0, CANT_CONSUMOS_TOTAL=0, GLU_120M_FR=0, GLU_120M_R=0,
+                                                            count_GLU_OUTP_FR=0, count_GLU_OUTP_R=0, count_HB_GLI_FR=0, count_HB_GLI_R=0))
+Valid_DBT_2015_short <- filter(Valid_DBT_2015_short, !(ID_PACIENTE %in% evol_long$ID_PACIENTE))
+
+Valid_DBT_2015_long <- Valid_DBT_2015 %>% arrange(ID_PACIENTE)
+Valid_DBT_2015_long <- filter(Valid_DBT_2015_long, !(ID_PACIENTE %in% Valid_DBT_2015_short$ID_PACIENTE))
+Valid_DBT_2015_long <- left_join(Valid_DBT_2015_long, evol_long, by='ID_PACIENTE')%>% left_join(glu_ayunas, by="ID_PACIENTE") %>%
+    left_join(hb1ac, by='ID_PACIENTE') %>% left_join(prob_count, by='ID_PACIENTE') %>% left_join(meds, by='ID_PACIENTE') %>% left_join(glu_120, by='ID_PACIENTE') 
+Valid_DBT_2015_long <- replace_na(Valid_DBT_2015_long, list(PROBLEMAS=0, CANT_CONSUMOS_TOTAL=0, GLU_120M_FR=0, GLU_120M_R=0,
+                                                              count_GLU_OUTP_FR=0, count_GLU_OUTP_R=0, count_HB_GLI_FR=0, count_HB_GLI_R=0))
+
+
+
+#Extraer valores de las evol
+############################
+evol2 <- read.xlsx("D:/Google Drive/Medicina/Investigacion/Investigaciones En curso/Data mining/Validacion algortimo DBT/Validation dataset/pma0719336_evol_full_tst_DBT.xlsx", 1)
+evol2 <- select(evol2, -ESTADO, -DIAGNOSTICO, -FULLYSPECIFIEDNAME, -EDAD20150101)
+evol2$glu1 <- as.numeric(str_extract_all(evol2$TEXTO, "(?<=(?i)glu)[0-9]+"))
+evol2$glu2 <- as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glu )[0-9]+"))
+evol2$glu3 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glu  )[0-9]+"))
+evol2$glu4 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glu: )[0-9]+"))
+evol2$glu5 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glu:  )[0-9]+"))
+evol2$glu6 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glucemia)[0-9]+"))
+evol2$glu7 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glucemia )[0-9]+"))
+evol2$glu8 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glucemia  )[0-9]+"))
+evol2$glu9 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glucemia: )[0-9]+"))
+evol2$glu10 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)glucemia:  )[0-9]+"))
+evol2$glu11 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc)[0-9]+"))
+evol2$glu12 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc )[0-9]+"))
+evol2$glu13 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc  )[0-9]+"))
+evol2$glu14 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc: )[0-9]+"))
+evol2$glu15 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc:  )[0-9]+"))
+evol2$glu_normal <-str_extract(evol2$TEXTO, "(?i)glucemia normal|(?i)glucemia sp|(?i)glucemia s\\/p|glu normal|(?i)glu sp|(?i)glu s\\/p")
+evol2$glu_total <- rowMeans(select(evol2, 4:18), na.rm=T)
+evol2 <- select(evol2, ID_PACIENTE, FECHA, glu_total, glu_normal)
+
+#Exporting
+##########
+
+write.xlsx(Valid_DBT_2015_long, "Valid_DBT_2015_long.xlsx", showNA=F)
+write.xlsx(Valid_DBT_2015_short, "Valid_DBT_2015_short.xlsx", showNA=F)
