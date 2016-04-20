@@ -4,12 +4,48 @@ library(tidyr)
 library(readxl)
 library(gbm)
 library(doSNOW)
+library(stringr)
+
 
 #Read in data
 DBT <- read_excel('PMA0719336_ScoreRiesgoCV_Corr_20150715 - FINAL CON OUTCOMES -Missing 2.xlsx')
 DBT <- select(DBT, -Comentarios, -Total_con_guardia, -Total_sin_guardia, -CANT_GLU_GUARDIA_FR, -CANT_GLU_GUARDIA_R)
 DBT$DBT_Alg_Missing <- make.names(DBT$DBT_Alg_Missing)
 DBT <- DBT[-1664,] %>% select(-DBT_Alg_Missing, -Result_Alg_Missing, -Missing_DBT_Manual)
+evol_missing <- read_excel('pma0719336_evol_dbt_glu_2000_2005_solomissing2.xlsx')
+evol_missing <- select(evol_missing, -ESTADO, -DIAGNOSTICO, -FULLYSPECIFIEDNAME)
+evol_missing <- filter(evol_missing, FECHA < '2005-01-01')
+evol_missing$glu1 <- as.numeric(str_extract_all(evol_missing$TEXTO, "(?<=(?i)glu)[0-9]+"))
+evol_missing$glu2 <- as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glu )[0-9]+"))
+evol_missing$glu3 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glu  )[0-9]+"))
+evol_missing$glu4 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glu: )[0-9]+"))
+evol_missing$glu5 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glu:  )[0-9]+"))
+evol_missing$glu6 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glucemia)[0-9]+"))
+evol_missing$glu7 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glucemia )[0-9]+"))
+evol_missing$glu8 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glucemia  )[0-9]+"))
+evol_missing$glu9 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glucemia: )[0-9]+"))
+evol_missing$glu10 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glucemia:  )[0-9]+"))
+evol_missing$glu11 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)gluc)[0-9]+"))
+evol_missing$glu12 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)gluc )[0-9]+"))
+evol_missing$glu13 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)gluc. )[0-9]+"))
+evol_missing$glu14 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)gluc:  )[0-9]+"))
+evol_missing$glu15 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glu:)[0-9]+"))
+evol_missing$glu16 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)gluc:)[0-9]+"))
+evol_missing$glu17 <-as.numeric(str_extract(evol_missing$TEXTO, "(?<=(?i)glucemia:)[0-9]+"))
+evol_missing$glu_normal <- str_detect(evol_missing$TEXTO, "(?i)glucemia normal|(?i)glucemia es normal|(?i)glucemia sp|(?i)glucemia s\\/p|glu normal|(?i)glu sp|(?i)glu s\\/p")
+evol_missing$glu_normal <- ifelse(evol_missing$glu_normal==TRUE,1,0)
+evol_missing$glu_total <- rowMeans(select(evol_missing, 4:20), na.rm=T)
+evol_missing <- select(evol_missing, ID_PACIENTE, FECHA, glu_total, glu_normal)
+evol_missing$glu_total[evol_missing$glu_total=='NaN']<- NA
+evol_missing$glu_total_FR_r <- ifelse(evol_missing$glu_total>=126, 1, 0)
+evol_missing$glu_total_R_r <- ifelse(evol_missing$glu_total<126, 1, 0)
+evol_missing <- group_by(select(evol_missing, ID_PACIENTE, glu_total_FR_r, glu_total_R_r), ID_PACIENTE) %>% 
+    summarise(glu_total_FR=sum(glu_total_FR_r), glu_total_R=sum(glu_total_R_r))
+
+#Joining
+DBT <- left_join(DBT, evol_missing, by='ID_PACIENTE') %>% replace_na(list(glu_total_FR=0, glu_total_R=0))
+DBT$CANT_GLU_AMB_FR <- rowSums(select(DBT, CANT_GLU_AMB_FR, glu_total_FR))
+DBT$CANT_GLU_AMB_R <- rowSums(select(DBT, CANT_GLU_AMB_R, glu_total_R))
 
 #Describe
 hist(DBT$CANT_GLU_AMB_R)
@@ -98,7 +134,7 @@ plot(varImp(gbm.DBT, scale=T))
 
 system.time(
     gbm.DBT2 <- train(make.names(DBT_Manual)~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R + CANT_HGLI_R + EDAD20050101,
-                     data=select(DBT_train, -ID_PACIENTE, -color, -pcolor),
+                     data=DBT_train,
                      tuneGrid=grid,
                      verbose=T,
                      metric='Accuracy',
@@ -108,11 +144,6 @@ system.time(
 )
 
 varImp(gbm.DBT2)
-grid3 <- expand.grid(n.trees=c(500),
-                     interaction.depth=4,
-                     shrinkage=0.01,
-                     n.minobsinnode=10)
-
 test_results <- predict(gbm.DBT2, DBT_test)
 confusionMatrix(test_results, make.names(DBT_test$DBT_Manual))
 
@@ -131,18 +162,20 @@ multiclass.roc(test_results$obs, test_results$pred)
 
 gbm.DBT_full <- train(make.names(DBT_Manual)~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R + CANT_HGLI_R + EDAD20050101,
                  data=DBT,
-                 #tuneGrid=grid,
+                 tuneGrid=grid,
                  verbose=T,
                  metric='Accuracy',
                  distribution='multinomial',
                  trControl=ctrl,
-                 tuneLength=3,
+                 #tuneLength=3,
                  method='gbm')
 
 
+a <- as.data.frame(gbm.DBT_full$results)
 
-0.9609+c(-1,1)*qnorm(.975)*0.01656741
-0.952+c(-1,1)*qnorm(.975)*0.004514493
+plot(gbm.DBT_full)
+0.9923+c(-1,1)*qnorm(.975)*(0.005821818/sqrt(10))
+0.969+c(-1,1)*qnorm(.975)*(0.01861743/sqrt(10))
 
 
 library(pROC)
