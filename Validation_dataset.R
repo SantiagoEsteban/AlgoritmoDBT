@@ -97,9 +97,22 @@ evol2$glu12 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc )[0-9]+"))
 evol2$glu13 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc  )[0-9]+"))
 evol2$glu14 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc: )[0-9]+"))
 evol2$glu15 <-as.numeric(str_extract(evol2$TEXTO, "(?<=(?i)gluc:  )[0-9]+"))
-evol2$glu_normal <-str_extract(evol2$TEXTO, "(?i)glucemia normal|(?i)glucemia sp|(?i)glucemia s\\/p|glu normal|(?i)glu sp|(?i)glu s\\/p")
+evol2$glu_normal <- str_detect(evol2$TEXTO, "(?i)glucemia normal|(?i)glucemia sp|(?i)glucemia s\\/p|glu normal|(?i)glu sp|(?i)glu s\\/p")
+evol2$glu_normal <- ifelse(evol2$glu_normal==TRUE,1,0)
 evol2$glu_total <- rowMeans(select(evol2, 4:18), na.rm=T)
 evol2 <- select(evol2, ID_PACIENTE, FECHA, glu_total, glu_normal)
+evol2$glu_total[evol2$glu_total=='NaN']<- NA
+evol2$glu_total_FR <- ifelse(evol2$glu_total>=126, 1, 0)
+evol2$glu_total_R <- ifelse(evol2$glu_total<126, 1, 0)
+
+
+#Looking up the patients who have 0 for all covariates
+
+evol3 <- group_by(ID_PACIENTE)
+
+
+
+
 
 #Exporting
 ##########
