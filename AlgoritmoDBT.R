@@ -9,12 +9,10 @@ library(stringr)
 
 #Read in data
 DBT <- read_excel('PMA0719336_ScoreRiesgoCV_Corr_20150715 - FINAL CON OUTCOMES -Missing 2.xlsx')
-DBT <- select(DBT, -Comentarios, -Total_con_guardia, -Total_sin_guardia, -CANT_GLU_GUARDIA_FR, -CANT_GLU_GUARDIA_R)
-DBT$DBT_Manual <- make.names(DBT$DBT_Manual)
 DBT <- DBT[-1664,]
 
 #Seleccionar solo aquellos que no tienen datos
-DBT$total <- select(DBT, 4:12) %>% rowSums()
+DBT$total <- select(DBT, 6:7) %>% rowSums()
 
 #Seleccionar solo aquellas evoluciones de quienes no tienen datos
 missing <- filter(DBT, total==0) %>% select(ID_PACIENTE)
@@ -48,10 +46,11 @@ evol_missing2$glu19 <-as.numeric(str_extract(evol_missing2$TEXTO, regex("(?<=(?i
 evol_missing2$glu20 <-as.numeric(str_extract(evol_missing2$TEXTO, regex("(?<=(?i)gluc:)[0-9]+", ignore.case=TRUE)))
 evol_missing2$glu21 <-as.numeric(str_extract(evol_missing2$TEXTO, regex("(?<=(?i)glucemia:)[0-9]+", ignore.case=TRUE)))
 evol_missing2$glu22 <-as.numeric(str_extract(evol_missing2$TEXTO, regex("(?<=(?i)gl:)[0-9]+", ignore.case=TRUE)))
+evol_missing2$glu23 <-as.numeric(str_extract(evol_missing2$TEXTO, regex("(?<=(?i)glucemia de )[0-9]+", ignore.case=TRUE)))
 evol_missing2$glu_normal <- str_detect(evol_missing2$TEXTO, regex("glucemia normal|glucemia es normal|glucemia sp|glucemia s\\/p|glu normal|gl sp|glu sp|glu s\\/p", 
                                                                         ignore.case=TRUE))
 evol_missing2$glu_normal <- ifelse(evol_missing2$glu_normal==TRUE,1,0)
-evol_missing2$glu_total <- rowMeans(select(evol_missing2, 5:26), na.rm=T)
+evol_missing2$glu_total <- rowMeans(select(evol_missing2, 5:27), na.rm=T)
 evol_missing2 <- select(evol_missing2, ID_PACIENTE, FECHA, glu_total, glu_normal)
 evol_missing2$glu_total[evol_missing2$glu_total=='NaN']<- NA
 evol_missing2$glu_total_FR_r <- ifelse(evol_missing2$glu_total>=126, 1, 0)
@@ -65,8 +64,7 @@ evol_missing2 <- group_by(select(evol_missing2, ID_PACIENTE, glu_total_FR_r, glu
 DBT <- left_join(DBT, evol_missing2, by='ID_PACIENTE') %>% replace_na(list(glu_total_FR=0, glu_total_R=0))
 DBT$CANT_GLU_AMB_FR <- rowSums(select(DBT, CANT_GLU_AMB_FR, glu_total_FR))
 DBT$CANT_GLU_AMB_R <- rowSums(select(DBT, CANT_GLU_AMB_R, glu_total_R))
-DBT <- select(DBT, -total, -glu_total_FR, -glu_total_R, -Total_sin_guardia)
-#VOLAR ULTIMAS DOS COLUMNAS
+DBT <- select(DBT, -total, -glu_total_FR, -glu_total_R)
 
 #Describe
 hist(DBT$CANT_GLU_AMB_R)
@@ -114,6 +112,7 @@ plot3d(x1, y1, z1, col=DBT$pcolor, type="p", box=F)
 
 
 #Split dataset
+DBT$DBT_Manual <- make.names(DBT$DBT_Manual)
 traintestpartition <- createDataPartition(DBT$DBT_Manual,
                                  p=.7,
                                  list=F,
@@ -130,17 +129,17 @@ ctrl <- trainControl(method='cv',
                      repeats=3, 
                      verboseIter = T, 
                      classProbs = T, 
-                     allowParallel = F,
+                     allowParallel = T,
                      summaryFunction = multiClassSummary)
 
-grid <- expand.grid(n.trees=c(50, 100,500),
+grid <- expand.grid(n.trees=c(50,100,200,300,400,500),
                     interaction.depth=c(4:8),
                     shrinkage=c(0.01, 0.001, 0.1),
                     n.minobsinnode=c(10))
 
 system.time(
 gbm.DBT <- train(make.names(DBT_Manual)~.,
-                 data=select(DBT_train, -ID_PACIENTE, -color, -pcolor),
+                 data=select(DBT, -ID_PACIENTE),
                  tuneGrid=grid,
                  verbose=T,
                  metric='Accuracy',
@@ -150,12 +149,12 @@ gbm.DBT <- train(make.names(DBT_Manual)~.,
                  method='gbm')
 )
 
-plot(gbm.DBT)                
-plot(varImp(gbm.DBT, scale=T))
+plot(gbm.DBT)               
+plot(varImp(gbm.DBT, scale=F))
 
 system.time(
-    gbm.DBT2 <- train(make.names(DBT_Manual)~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R + CANT_HGLI_R + EDAD20050101,
-                     data=DBT_train,
+    gbm.DBT2 <- train(DBT_Manual~CANT_GLU_AMB_R + CANT_GLU_AMB_FR + CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_HGLI_FR + CANT_HGLI_R + EDAD20050101,
+                     data=DBT,
                      tuneGrid=grid,
                      verbose=T,
                      metric='Accuracy',
@@ -164,9 +163,14 @@ system.time(
                      method='gbm')
 )
 
-varImp(gbm.DBT2)
-test_results <- predict(gbm.DBT2, DBT_test)
-confusionMatrix(test_results, make.names(DBT_test$DBT_Manual))
+plot(varImp(gbm.DBT2))
+test_results <- predict(gbm.DBT2, DBT)
+test_results <- as.data.frame(cbind(ID_PACIENTE=DBT$ID_PACIENTE,test_results))
+DBT_result_alg <- left_join(DBT, test_results, by='ID_PACIENTE')
+write.csv(DBT_result_alg, 'DBT_result_alg2.csv')
+
+
+confusionMatrix(test_results, make.names(DBT$DBT_Manual))
 
 #AUC CI
 0.9883011+c(-1,1)*qnorm(.975)*0.004514493
@@ -229,9 +233,5 @@ roc(as.vector(test_results$obs), as.vector(as.numeric(test_results))
 ?roc
 
 # Pendientes
-# Escribir el algoritmo en reg ex para extraer las glucemias del texto libre
-# Wranglear la base para validacion manual
-# Validacion manual
-# Terminar de entrenar en la bas de derivacion
 # Wranglear la base para validacion del algoritmo
 # Validar en la base de validación
