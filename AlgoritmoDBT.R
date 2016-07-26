@@ -153,7 +153,7 @@ plot(gbm.DBT)
 plot(varImp(gbm.DBT, scale=F))
 
 system.time(
-    gbm.DBT2 <- train(DBT_Manual~CANT_GLU_AMB_R + CANT_GLU_AMB_FR + CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_HGLI_FR + CANT_HGLI_R + EDAD20050101,
+    gbm.DBT2 <- train(make.names(DBT_Manual)~CANT_GLU_AMB_R + CANT_GLU_AMB_FR + CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_HGLI_FR + CANT_HGLI_R + EDAD20050101,
                      data=DBT,
                      tuneGrid=grid,
                      verbose=T,
@@ -169,68 +169,18 @@ test_results <- as.data.frame(cbind(ID_PACIENTE=DBT$ID_PACIENTE,test_results))
 DBT_result_alg <- left_join(DBT, test_results, by='ID_PACIENTE')
 write.csv(DBT_result_alg, 'DBT_result_alg2.csv')
 
-
 confusionMatrix(test_results, make.names(DBT$DBT_Manual))
 
-#AUC CI
-0.9883011+c(-1,1)*qnorm(.975)*0.004514493
 
-0.9579703+c(-1,1)*qnorm(.975)*0.01681903
+###################
+#Algoritmo booleano
+###################
+DBT_bool <- DBT
+DBT_bool$dos_glu_FR <- ifelse(DBT_bool$CANT_GLU_AMB_FR>=2,1,0)
+DBT_bool$dos_hbglic_FR <- ifelse(DBT_bool$CANT_HGLI_FR>=2,1,0)
+DBT_bool$glu_hbglic_FR <- ifelse(DBT_bool$CANT_HGLI_FR>=1 & DBT_bool$CANT_GLU_AMB_FR>=1,1,0)
+DBT_bool$lab_anormal <- ifelse(DBT_bool$dos_glu_FR==1 | DBT_bool$dos_hbglic_FR==1 | DBT_bool$glu_hbglic_FR==1,1,0)
 
-
-test_results$obs <- DBT_test$DBT_Alg_Missing
-test_results$pred <- predict(gbm.DBT3, DBT_test)
-mnLogLoss(test_results, lev = levels(test_results$obs))
-multiClassSummary(test_results, lev = levels(test_results$obs))
-multiclass.roc(test_results$obs, test_results$pred)
-
-
-gbm.DBT_full <- train(make.names(DBT_Manual)~CANT_PROB_DBT_REL + CANT_CONSUMOS + CANT_GLU_AMB_FR + CANT_GLU_AMB_R + CANT_HGLI_R + EDAD20050101,
-                 data=DBT,
-                 tuneGrid=grid,
-                 verbose=T,
-                 metric='Accuracy',
-                 distribution='multinomial',
-                 trControl=ctrl,
-                 #tuneLength=3,
-                 method='gbm')
-
-
-a <- as.data.frame(gbm.DBT_full$results)
-
-plot(gbm.DBT_full)
-0.9923+c(-1,1)*qnorm(.975)*(0.005821818/sqrt(10))
-0.969+c(-1,1)*qnorm(.975)*(0.01861743/sqrt(10))
-
-
-library(pROC)
-predictions <- as.numeric(predict(gbm.DBT2, DBT_test, type = 'raw'))
-ROC <-multiclass.roc(DBT_test$DBT_Manual, predictions)
-ci(ROC)
-
-library(ROCR)
-prediction(predictions, DBT_test$DBT_Manual)
-
-
-plot(1-ROC$rocs[[1]]$specificities)
-
-
-
-DBT_test_roc <- DBT_test
-DBT_test_roc$
-
-
-test_results <- predict(gbm.DBT2, DBT_test)
-test_results2 <- NULL
-test_results2$obs <- make.names(DBT_test$DBT_Manual)
-test_results2$pred <- predict(gbm.DBT2, DBT_test)
-confusionMatrix(test_results, test_results$obs)
-multiClassSummary(test_results, lev = test_results$obs)
-
-
-library(pROC)
-roc(as.vector(test_results$obs), as.vector(as.numeric(test_results))
-?roc
 
 # Pendientes
 # Wranglear la base para validacion del algoritmo
